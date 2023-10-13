@@ -1,11 +1,11 @@
 package org.grapheco.lynx.runner
 
 import com.typesafe.scalalogging.LazyLogging
-import org.grapheco.lynx.dataframe.{DefaultDataFrameOperator, DataFrameOperator}
+import org.grapheco.lynx.dataframe.{DataFrameOperator, DefaultDataFrameOperator}
 import org.grapheco.lynx.evaluator.{DefaultExpressionEvaluator, ExpressionEvaluator}
 import org.grapheco.lynx.logical.{DefaultLogicalPlanner, LPTNode, LogicalPlanner, LogicalPlannerContext}
 import org.grapheco.lynx.parser.{CachedQueryParser, DefaultQueryParser, QueryParser}
-import org.grapheco.lynx.procedure._
+import org.grapheco.lynx.procedure.{AggregatingFunctions, _}
 import org.grapheco.lynx.types.{DefaultTypeSystem, LynxValue, TypeSystem}
 import org.grapheco.lynx.util.FormatUtils
 import org.grapheco.lynx._
@@ -21,20 +21,24 @@ import org.opencypher.v9_0.ast.semantics.SemanticState
  * @Date 2022/4/27
  * @Version 0.1
  */
-class CypherRunner(graphModel: GraphModel) extends LazyLogging {
+class CypherRunner(var graphModel: GraphModel, var proceduresName: Seq[String] = Seq.empty) extends LazyLogging {
+  proceduresName ++= Seq(
+    classOf[AggregatingFunctions].getName,
+    classOf[ListFunctions].getName,
+    classOf[LogarithmicFunctions].getName,
+    classOf[NumericFunctions].getName,
+    classOf[PredicateFunctions].getName,
+    classOf[StringFunctions].getName,
+    classOf[TimeFunctions].getName,
+    classOf[TrigonometricFunctions].getName,
+    classOf[SpatialFunctions].getName,
+    classOf[FullTextIndexFunctions].getName)
+  private val proceduresClass: Seq[Class[_]] = proceduresName.map(name => getClassByName(name).get)
   protected lazy val types: TypeSystem = new DefaultTypeSystem()
   val scalarFunctions: ScalarFunctions = new ScalarFunctions(graphModel)
   protected lazy val procedures: WithGraphModelProcedureRegistry = new WithGraphModelProcedureRegistry(types,
     scalarFunctions,
-    classOf[AggregatingFunctions],
-    classOf[ListFunctions],
-    classOf[LogarithmicFunctions],
-    classOf[NumericFunctions],
-    classOf[PredicateFunctions],
-    classOf[StringFunctions],
-    classOf[TimeFunctions],
-    classOf[TrigonometricFunctions],
-    classOf[SpatialFunctions])
+    proceduresClass:_*)
   protected lazy val expressionEvaluator: ExpressionEvaluator = new DefaultExpressionEvaluator(graphModel, types, procedures)
   protected lazy val dataFrameOperator: DataFrameOperator = new DefaultDataFrameOperator(expressionEvaluator)
   private implicit lazy val runnerContext = CypherRunnerContext(types, procedures, dataFrameOperator, expressionEvaluator, graphModel)
@@ -103,5 +107,12 @@ class CypherRunner(graphModel: GraphModel) extends LazyLogging {
       }
     }
   }
-
+  def getClassByName[T](className: String): Option[Class[_]] = {
+    try {
+      val classLoader = Thread.currentThread.getContextClassLoader
+      Some(classLoader.loadClass(className))
+    } catch {
+      case _: ClassNotFoundException => None
+    }
+  }
 }
